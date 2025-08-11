@@ -380,3 +380,56 @@ def produce(p:WOProduceIn, db:Session=Depends(get_db), user=Depends(require_role
     st_fg.avg_cost=(total_prev + unit_cost*p.qty)/st_fg.qty if st_fg.qty else unit_cost
     db.add(WorkOrderFG(wo_id=wo.id, product_id=wo.product_id, qty=p.qty, wh_id=wh.id, unit_cost=unit_cost))
     wo.produced_qty += p.qty; db.commit(); return {"ok":True,"unit_cost":round(unit_cost,3)}
+# ---- Basit web arayüz (gömülü) ----
+MINI_UI = """<!doctype html><meta charset="utf-8"><title>Fixar Mini UI</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<body style="font:14px system-ui;margin:20px;max-width:680px">
+<h2>Fixar ERP – Mini</h2>
+<label>Backend URL</label>
+<input id="base" value="" style="width:100%"><br><br>
+<label>Kullanıcı / Şifre</label>
+<input id="u" placeholder="admin"> <input id="p" placeholder="123456" type="password">
+<button onclick="login()">Giriş</button>
+<pre id="out" style="background:#f4f4f4;padding:12px;white-space:pre-wrap"></pre>
+<hr>
+<button onclick="health()">/health kontrol</button>
+<button onclick="seed()">Örnek verileri yükle</button>
+<button onclick="snapshot()">Stok snapshot</button>
+<table id="tbl" border="1" cellpadding="6" style="width:100%;margin-top:10px;display:none">
+<thead><tr><th>Stok</th><th>Depo</th><th>Miktar</th><th>Ortalama Maliyet</th></tr></thead><tbody></tbody></table>
+<script>
+let token="";
+const B=()=>document.getElementById('base').value.replace(/\/+$/,'');
+const out=(x)=>document.getElementById('out').textContent=typeof x==="string"?x:JSON.stringify(x,null,2);
+async function api(p,m="GET",b){let r=await fetch(B()+p,{method:m,headers:Object.assign({"Content-Type":"application/json"},token?{"Authorization":"Bearer "+token}:{}) ,body:b?JSON.stringify(b):null});let d=await r.json().catch(()=>({status:r.status}));if(!r.ok)throw d;return d;}
+async function login(){try{document.getElementById('base').value ||= location.origin; let d=await api("/auth/login","POST",{username:document.getElementById('u').value||"admin",password:document.getElementById('p').value||"123456"});token=d.access_token;out("Giriş OK");}catch(e){out(e)}}
+async function health(){try{document.getElementById('base').value ||= location.origin; out(await api("/health"));}catch(e){out(e)}}
+async function seed(){try{
+  document.getElementById('base').value ||= location.origin;
+  try{await api("/auth/register","POST",{username:"admin",password:"123456",roles:["Admin","Depo","Satis","Muhasebe","Uretim"]})}catch(_){}
+  if(!token){let d=await api("/auth/login","POST",{username:"admin",password:"123456"});token=d.access_token;}
+  try{await api("/warehouses/","POST",{code:"MERKEZ-HAMMADDE",name:"Merkez Hammadde"})}catch(_){}
+  try{await api("/warehouses/","POST",{code:"MERKEZ-MAMUL",name:"Merkez Mamul"})}catch(_){}
+  try{await api("/items/","POST",{code:"10100-POLIOL",name:"Poliol 10100",type:"Hammadde",unit:"kg",vat_rate:20})}catch(_){}
+  try{await api("/items/","POST",{code:"FIXAR-USPA-MEM-PRINT",name:"USPA Mem Print",type:"Mamul",unit:"adet",vat_rate:20})}catch(_){}
+  try{await api("/parties/","POST",{code:"USPA",name:"USPA",type:"Musteri",vade_gun:180})}catch(_){}
+  try{await api("/stock/move","POST",{item_code:"10100-POLIOL",wh_to_code:"MERKEZ-HAMMADDE",qty:100,unit_price:97,move_type:"IN",ref:"ALIS-001"})}catch(_){}
+  out("Örnek veriler yüklendi");
+}catch(e){out(e)}}
+async function snapshot(){try{document.getElementById('base').value ||= location.origin; let d=await api("/stock/snapshot");let tb=document.querySelector("#tbl");let tbdy=tb.querySelector("tbody");tbdy.innerHTML=d.map(r=>`<tr><td>${r.item_code}</td><td>${r.warehouse_code}</td><td>${r.qty}</td><td>${r.avg_cost}</td></tr>`).join("");tb.style.display="table";out("Snapshot OK")}catch(e){out(e)}}
+</script>"""
+
+@app.get("/", response_class=HTMLResponse)
+def root_page():
+    # Ana sayfa: /ui ve /docs linkleri
+    return HTMLResponse(
+        '<meta charset="utf-8"><body style="font:14px system-ui;padding:20px">'
+        '<h2>Fixar ERP API</h2>'
+        '<p>Uygulama ayakta. Seçenekler:</p>'
+        '<p>• <a href="/ui">Mini Arayüz</a><br>• <a href="/docs">API Dokümanı</a></p>'
+        '</body>'
+    )
+
+@app.get("/ui", response_class=HTMLResponse)
+def mini_ui():
+    return HTMLResponse(MINI_UI)
